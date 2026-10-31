@@ -182,7 +182,16 @@ void runPID() {
   }
 
   // ---------------------------
-  // Fixed-point PID  (จุดตัด: ไม่มีโหมดพิเศษ PID คุมต่อเนื่อง)
+  // เส้นขวางกว้าง (จุดตัด): ตำแหน่งเส้นไม่มีข้อมูลซ้าย-ขวา จึงไม่ใช้รอบนี้
+  // ไม่แตะ lastError / dFiltered / cornerMode และไม่มี timer -> PID คุมต่อทันทีที่พ้นเส้น
+  // ---------------------------
+  if (blackCount >= WIDE_BLACK_COUNT) {
+    moveMotor(clamp16(curP.base + LEFT_TRIM), clamp16(curP.base + RIGHT_TRIM));
+    return;
+  }
+
+  // ---------------------------
+  // Fixed-point PID
   // ---------------------------
   const int16_t error = (int16_t)position - (LINE_CENTER + CENTER_OFFSET);
 
