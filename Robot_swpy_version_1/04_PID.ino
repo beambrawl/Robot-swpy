@@ -104,13 +104,13 @@ static inline int16_t chooseBaseSpeed(int16_t absError) {
   int16_t v;
 
   if (cornerMode) {
-    if (absError > 2600)      v = b - 20;   // (110) สำหรับ 140 
+    if (absError > 2600)      v = b - 30;   // (110) สำหรับ 140 
     else if (absError > 1800) v = b - 2;    // (138) สำหรับ 140 
     else if (absError > 1200) v = b + 20;   // (160) สำหรับ 140 
     else if (absError > 700)  v = b + 40;   // (180) สำหรับ 140 
     else                      v = b - 10;   // (130) สำหรับ 140 
   } else {
-    if (absError > 2600)      v = b - 20;   // (110) สำหรับ 140 
+    if (absError > 2600)      v = b - 30;   // (110) สำหรับ 140 
     else if (absError > 1800) v = b - 8;    // (132) สำหรับ 140 
     else if (absError > 1100) v = b + 6;    // (146) สำหรับ 140 
     else                      v = b;        // (140) สำหรับ 140 
