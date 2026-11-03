@@ -5,7 +5,7 @@ void setupSensors() {
 
 void calibrateSensors() {
   // เก็บค่าเซนเซอร์หลายครั้งเพื่อให้ครอบคลุมขาว/ดำ
-  for (uint16_t i = 0; i < 150; i++) {
+  for (uint16_t i = 0; i < 50; i++) {
     qtr.calibrate();
     delay(20);
   }
