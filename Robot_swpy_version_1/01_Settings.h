@@ -8,7 +8,7 @@
 constexpr uint8_t maxSpeed    = 255;   // เพดาน PWM
 
 // ความเร็วพิเศษ
-constexpr uint8_t searchSpeed  = 95;    // หาเส้นเมื่อหลุด
+constexpr uint8_t searchSpeed  = 200;    // หาเส้นเมื่อหลุด
 constexpr uint8_t twitchSpeed  = 50;    // กระตุกล้อสัญญาณ
 
 // ---------------------------
