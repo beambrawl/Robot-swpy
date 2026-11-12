@@ -1,0 +1,171 @@
+#pragma once
+#include <Arduino.h>
+
+// ---------------------------
+// ความเร็วหลัก
+// (baseSpeed / Kp / Kd ย้ายไปอยู่ในตาราง PROFILES ด้านล่างแล้ว)
+// ---------------------------
+constexpr uint8_t maxSpeed    = 255;   // เพดาน PWM
+
+// ความเร็วพิเศษ
+constexpr uint8_t searchSpeed  = 110;    // หาเส้นเมื่อหลุด
+constexpr uint8_t twitchSpeed  = 50;    // กระตุกล้อสัญญาณ
+
+// ---------------------------
+// PID แบบ fixed-point
+// correction = (error*Kp + d*Kd) / PID_SCALE
+// ---------------------------
+constexpr int16_t PID_SCALE = 1000;
+
+constexpr int16_t LINE_CENTER = 3500; // 0..7000 จาก QTR 8 ตัว
+constexpr int16_t CENTER_OFFSET = 0;   // ถ้ารถเอียง ค่อยปรับค่านี้
+constexpr int8_t LEFT_TRIM  = 0;        // ปรับสมดุลมอเตอร์ซ้าย
+constexpr int8_t RIGHT_TRIM = -4;       // ปรับสมดุลมอเตอร์ขวา
+
+// โหมดโค้ง 90° จะเข้าเมื่อ error สูงต่อเนื่อง (ของเดิม)
+constexpr int16_t CORNER_ENTER_ERROR = 2100;
+constexpr int16_t CORNER_EXIT_ERROR   = 1400;
+constexpr uint8_t CORNER_ENTER_LOOPS  = 2;
+constexpr uint8_t CORNER_EXIT_LOOPS    = 3;
+
+// ---------------------------
+// TIME-BASED PROFILE  (นับเวลาตั้งแต่ปล่อยปุ่มเริ่มวิ่ง)
+// ---------------------------
+// แต่ละแถว = 1 ช่วงเวลา ต่อกันตามลำดับจากบนลงล่าง เริ่มนับตอนปล่อยรถ
+//   durMs     : "ความยาว" ของช่วงนี้ (ไม่ใช่เวลาสิ้นสุด) เช่น S(0.3) = ช่วงนี้ยาว 0.3 วิ
+//               เปลี่ยนความยาวช่วงไหน ช่วงที่ตามมาทั้งหมดจะเลื่อนตามเอง ไม่ต้องแก้แถวอื่น
+//               เขียนเป็นวินาทีได้ทั้งเต็มและทศนิยม: S(5), S(0.1) หรือเขียน ms ตรง ๆ เช่น 300
+//               ยาวสุดต่อช่วง 65 วินาที (เกินนี้คอมไพล์ไม่ผ่าน)
+//               แถวสุดท้ายต้องเป็น PROFILE_FOREVER (คงค่านี้ไปจนหยุดรถ)
+//   baseSpeed : ความเร็วฐานของช่วงนั้น (ความเร็วทางตรง)
+//   Kp, Kd    : เกนตอนวิ่งปกติ
+//   KpCorner, KdCorner : เกนตอนเข้า corner mode (ของเดิม ใช้ตอน error สูงต่อเนื่อง)
+//                        ถ้าไม่ต้องการแยก ให้ใส่เท่า Kp/Kd
+//
+// หมายเหตุ: ความเร็วที่ลด/เพิ่มตาม |error| (ใน chooseBaseSpeed ของ 04_PID.ino)
+//           เป็นค่า "เพิ่ม/ลดจาก baseSpeed ของช่วงนั้น" ไม่ใช่ค่าตายตัวแล้ว
+// S() คำนวณตอนคอมไพล์เท่านั้น (ใช้กับค่าคงที่ในตาราง) ไม่มีการคำนวณทศนิยมตอนรันบนบอร์ด
+// ห้ามใช้ S() กับตัวแปรที่เปลี่ยนค่าตอนรัน เพราะจะดึง float บน AVR เข้ามา
+#define S(sec) ((uint32_t)((sec) * 1000.0 + 0.5))
+
+struct PIDProfile {
+  uint16_t durMs;
+  uint8_t  baseSpeed;
+  int16_t  Kp;
+  int16_t  Kd;
+  int16_t  KpCorner;
+  int16_t  KdCorner;
+};
+
+// ค่าที่ใช้งานจริงตอนวิ่ง (อยู่ในไฟล์ .h เพราะ Arduino สร้าง prototype ไว้ก่อนโค้ดใน .ino)
+struct ProfileParams {
+  int16_t base, kp, kd, kpC, kdC;
+};
+
+constexpr uint16_t PROFILE_FOREVER = 0xFFFF;   // ใช้เฉพาะแถวสุดท้าย (ความยาว 65535 ms จึงใช้เป็นความยาวจริงไม่ได้)
+
+// เวลาไล่ค่าจากชุดเก่าไปชุดใหม่ตอนเปลี่ยนช่วง (ms) ใส่ 0 = เปลี่ยนทันที
+constexpr uint16_t PROFILE_BLEND_MS = 50;
+
+// ตาราง: คอลัมน์แรกคือความยาวของช่วง ตัวเลขในคอมเมนต์ท้ายแถวเป็นแค่บันทึก ค่าจริงคือคอลัมน์แรก
+constexpr PIDProfile PROFILES[] = {
+  //  durMs              base   Kp   Kd   KpC  KdC
+  //----------- ตรง 1 ------------------------------------------------------
+  {  S(0.2),             100,   30,  500,  40,  750 },   // เตรียม 0.2
+  {  S(0.2),             130,   29,  500,  40,  800 },   // เตรียมเข้าเร่ง 0.1
+  {  S(0.2),             160,   30,  500,  40,  750 },   // เตรียมเร่ง 0.7
+  {  S(0.4),             190,   30,  500,  40,  750 },   // เร่งทางตรง 0.7
+  //----------- โค้ง 1 ------------------------------------------------------
+  {  S(0.3),             100,   30,  500,  40,  750 },   // ช่วงโค้ง 0.3
+  //----------- ตรง 2 ------------------------------------------------------
+  {  S(0.2),             130,   29,  500,  40,  800 },   // ปกติ 0.2
+  {  S(0.2),             160,   30,  500,  40,  750 },   // เตรียมเร่ง 0.2
+  {  S(0.4),             190,   30,  500,  40,  750 },   // เร่งทางตรง 0.5
+  //----------- โค้ง 2 ------------------------------------------------------
+  {  S(0.4),             100,   30,  500,  40,  750 },   // ช่วงโค้ง 0.3
+  //----------- เร่งโค้ง ------------------------------------------------------
+  {  S(0.2),             130,   29,  500,  40,  800 },   // ปกติ 0.2
+  {  S(0.2),             160,   30,  500,  40,  750 },   // เตรียมเร่ง 0.2
+  {  S(0.7),             190,   30,  500,  40,  750 },   // เร่งทางโค้ง 0.7
+  //----------- โค้ง 3 ------------------------------------------------------
+  {  S(0.4),             100,   30,  500,  40,  750 },   // ช่วงโค้ง 0.4
+  //----------- เข้าใน ------------------------------------------------------
+  {  S(4.2),             130,   29,  500,  40,  800 },   // ปกติ 4.2
+  //----------- โค้งในอันตราย ------------------------------------------------
+  {  S(0.6),              80,   30,  500,  40,  750 },   // ชะลอ 0.6
+  //----------- โค้งในสุด ------------------------------------------------------
+  {  S(0.4),             130,   29,  500,  40,  800 },   // ปกติ 0.4
+  {  S(0.4),             160,   30,  500,  40,  750 },   // เร่งโค้ง 0.4
+  //------------ ตรง 3 ------------------------------------------------------
+  {  S(0.3),             190,   30,  500,  40,  750 },   // เร่งตรง 0.4
+  //------------ ช่วงโค้ง ------------------------------------------------------
+  {  S(0.6),             150,   32,  500,  40,  750 },   // เร่งโค้ง 0.6
+  
+  {  PROFILE_FOREVER,    140,   31,  500,  40,  800 },   // ช่วงสุดท้าย   kp 25 กลม    30 เลขสี่
+};
+constexpr uint8_t PROFILE_COUNT = sizeof(PROFILES) / sizeof(PROFILES[0]);
+
+static_assert(PROFILE_COUNT >= 1, "PROFILES ต้องมีอย่างน้อย 1 แถว");
+static_assert(PROFILES[PROFILE_COUNT - 1].durMs == PROFILE_FOREVER,
+              "แถวสุดท้ายของ PROFILES ต้องใช้ durMs = PROFILE_FOREVER");
+
+// PROFILE_FOREVER ใช้ได้เฉพาะแถวสุดท้าย (ถ้าอยู่แถวกลาง แถวหลังจากนั้นจะไม่ถูกใช้เลย)
+constexpr bool profileForeverOnlyLast(uint8_t i) {
+  return (i + 1 >= PROFILE_COUNT) ? true
+       : (PROFILES[i].durMs != PROFILE_FOREVER) && profileForeverOnlyLast(i + 1);
+}
+static_assert(profileForeverOnlyLast(0),
+              "PROFILE_FOREVER ใช้ได้เฉพาะแถวสุดท้ายของ PROFILES เท่านั้น");
+
+// ทุกช่วงที่มีขอบเขต (ยกเว้นแถวสุดท้าย) ต้องยาวมากกว่า 0
+constexpr bool profileDurationsPositive(uint8_t i) {
+  return (i + 1 >= PROFILE_COUNT) ? true
+       : (PROFILES[i].durMs > 0) && profileDurationsPositive(i + 1);
+}
+static_assert(profileDurationsPositive(0),
+              "มีช่วงใน PROFILES ที่ durMs = 0 (ช่วงยาว 0 จะถูกข้ามเงียบ ๆ) ตรวจตัวเลข S(...)");
+
+// ทุกช่วงที่มีขอบเขต (ยกเว้นแถวสุดท้าย) ต้องยาว >= PROFILE_BLEND_MS ไม่งั้นค่าไล่ไม่ถึงเป้าก่อนเปลี่ยนช่วงถัดไป
+constexpr bool profileDurationsLongEnough(uint8_t i) {
+  return (i + 1 >= PROFILE_COUNT) ? true
+       : (PROFILES[i].durMs >= PROFILE_BLEND_MS) && profileDurationsLongEnough(i + 1);
+}
+static_assert(profileDurationsLongEnough(0),
+              "มีช่วงใน PROFILES สั้นกว่า PROFILE_BLEND_MS: ขยายช่วงนั้น หรือลด PROFILE_BLEND_MS (0 = เปลี่ยนทันที)");
+
+// เวลารวมของช่วงที่มีขอบเขตทั้งหมด (ms) = เวลาที่แถวสุดท้ายเริ่มทำงาน ใช้ตรวจตาราง ไม่กินหน่วยความจำ
+constexpr uint32_t profileFiniteTotalMs(uint8_t i) {
+  return (i + 1 >= PROFILE_COUNT) ? 0UL
+       : (uint32_t)PROFILES[i].durMs + profileFiniteTotalMs(i + 1);
+}
+constexpr uint32_t PROFILE_FINITE_TOTAL_MS = profileFiniteTotalMs(0);
+// ตัวอย่างล็อกเวลารวมไว้กันแก้พลาด (เอา // ออกแล้วใส่ค่าที่ต้องการ):
+// static_assert(PROFILE_FINITE_TOTAL_MS == S(10.6), "เวลารวมของตารางเปลี่ยนไปจากที่ตั้งใจ");
+
+// ---------------------------
+// Sensor / Lost-line
+// ---------------------------
+constexpr uint8_t SENSOR_COUNT = 8;
+constexpr uint8_t DARK_THRESHOLD = 500;   // (ของเดิม ดูหมายเหตุในสรุป: uint8_t เก็บ 500 ไม่ได้ ค่าจริง = 244)
+
+// เส้นขวาง/จุดตัด: ถ้าดำพร้อมกันตั้งแต่กี่ตัวขึ้นไป ถือว่าตำแหน่งเส้นไม่มีข้อมูลซ้าย-ขวา
+// -> ไม่เอามาคิด error รอบนั้น ให้วิ่งตรงด้วยความเร็วของ profile (ไม่มี timer ไม่มี lock)
+// ใช้ค่าเดิมของ v3.3 (CROSS_DARK_COUNT = 6) ใส่ 9 = ปิดระบบนี้ (เพื่อทดสอบเทียบ)
+constexpr uint8_t WIDE_BLACK_COUNT = 6;
+
+constexpr uint8_t LOST_CONFIRM_LOOPS = 2;  // หลุดเส้นติดต่อกันกี่ loop ถึงเข้าสู่โหมดค้นหา//3
+
+// ---------------------------
+// ขาอุปกรณ์ (ห้ามเปลี่ยน)
+// ---------------------------
+constexpr uint8_t PWMA = 5;
+constexpr uint8_t AIN1 = 2;
+constexpr uint8_t AIN2 = 3;
+
+constexpr uint8_t PWMB = 6;
+constexpr uint8_t BIN1 = 4;
+constexpr uint8_t BIN2 = 7;
+
+constexpr uint8_t BUTTON_PIN = 8;
+
+constexpr uint8_t SENSOR_PINS[8] = {A7, A6, A5, A4, A3, A2, A1, A0};
