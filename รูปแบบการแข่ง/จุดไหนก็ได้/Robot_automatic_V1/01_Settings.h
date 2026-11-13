@@ -70,7 +70,7 @@ constexpr uint16_t PROFILE_BLEND_MS = 50;
 // ตาราง: คอลัมน์แรกคือความยาวของช่วง ตัวเลขในคอมเมนต์ท้ายแถวเป็นแค่บันทึก ค่าจริงคือคอลัมน์แรก
 constexpr PIDProfile PROFILES[] = {
   //  durMs              base   Kp   Kd   KpC  KdC
-  {  S(0.2),             100,   30,  500,  40,  750 },   // เตรียม 0.2
+  {  S(0.3),             100,   30,  500,  40,  750 },   // เตรียม 0.2
   {  PROFILE_FOREVER,    140,   31,  500,  40,  800 },   // ช่วงปกติ   
 };
 constexpr uint8_t PROFILE_COUNT = sizeof(PROFILES) / sizeof(PROFILES[0]);
